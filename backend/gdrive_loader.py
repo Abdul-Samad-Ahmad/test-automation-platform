@@ -1,0 +1,125 @@
+import os
+import gdown
+import uuid
+import shutil
+from androguard.core.apk import APK
+
+# Base directory of the backend package (this file)
+BASE_DIR = os.path.dirname(__file__)
+
+# Config: Where to store downloaded APKs
+DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_apks")
+# Config for where to save extracted icons
+ICON_DIR = os.path.join(BASE_DIR, "static", "icons")
+
+def extract_app_icon(apk_path: str) -> str:
+    """
+    Extracts the icon from the APK and saves it as a PNG.
+    Returns: The relative path to the saved icon image.
+    """
+    if not os.path.exists(ICON_DIR):
+        os.makedirs(ICON_DIR, exist_ok=True)
+    
+    try:
+        # 1. Parse the APK
+        app = APK(apk_path)
+        
+        # 2. get_app_icon() returns the path/name of the icon file inside the APK
+        icon_name = app.get_app_icon()
+        if not icon_name:
+            print("⚠️ No icon found in APK.")
+            return None
+
+        # 3. Read the actual bytes of that file from the APK
+        icon_data = app.get_file(icon_name)
+        if not icon_data:
+            print(f"⚠️ Could not read icon file from APK: {icon_name}")
+            return None
+
+        # 4. Create a unique filename for the icon (same base name as APK)
+        apk_filename = os.path.basename(apk_path)
+        icon_filename = apk_filename.replace(".apk", ".png")
+        icon_path = os.path.join(ICON_DIR, icon_filename)
+
+        # 5. Save bytes to file
+        with open(icon_path, "wb") as f:
+            f.write(icon_data)
+            
+        print(f"🖼️ Icon extracted: {icon_path}")
+        
+        # Return URL-friendly path
+        return f"/static/icons/{icon_filename}"
+
+    except Exception as e:
+        print(f"❌ Failed to extract icon: {e}")
+        return None
+    
+def get_apk_info(apk_path: str) -> dict | None:
+    """
+    Returns basic metadata from the APK:
+    { "app_name": str, "package_name": str }
+    """
+    try:
+        app = APK(apk_path)
+        return {
+            "app_name": app.get_app_name(),
+            "package_name": app.get_package(),
+        }
+    except Exception as e:
+        print(f"❌ Failed to read APK info: {e}")
+        return None
+    
+def download_apk(gdrive_url: str) -> str:
+    """
+    Downloads APK from Google Drive into DOWNLOAD_DIR,
+    keeping the original APK filename.
+    Returns: The ABSOLUTE path to the downloaded file (Required for Appium).
+    """
+    # 1. Ensure the download directory exists
+    if not os.path.exists(DOWNLOAD_DIR):
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+    print(f"⬇️ Starting download from GDrive: {gdrive_url}")
+    print(f"📂 Target Directory: {DOWNLOAD_DIR}")
+
+    try:
+        # 2. Let gdown decide the filename (original name), download to current dir
+        tmp_path = gdown.download(
+            gdrive_url,
+            quiet=False,
+            fuzzy=True
+        )
+
+        # 3. Verify the file actually exists and isn't empty
+        if not tmp_path or not os.path.exists(tmp_path):
+            raise Exception("Download failed - gdown returned no path.")
+
+        if os.path.getsize(tmp_path) < 1000:
+            raise Exception("Download failed - File is too small (likely an HTML error page).")
+
+        # 4. Move the file into DOWNLOAD_DIR, keeping original filename
+        filename = os.path.basename(tmp_path)
+        final_path = os.path.join(DOWNLOAD_DIR, filename)
+
+        # If it's not already there, move it
+        if os.path.abspath(tmp_path) != os.path.abspath(final_path):
+            shutil.move(tmp_path, final_path)
+
+        abs_path = os.path.abspath(final_path)
+        print(f"✅ APK Ready at: {abs_path}")
+        return abs_path
+
+    except Exception as e:
+        print(f"❌ Error downloading APK: {str(e)}")
+        # Cleanup: Remove partial file if it exists
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise e
+    
+def cleanup_apk(file_path: str):
+    """
+    Optional: Call this after test finishes to free up space
+    """
+    if os.path.exists(file_path):
+        os.remove(file_path)
+        print(f"🧹 Cleaned up temporary APK: {file_path}")

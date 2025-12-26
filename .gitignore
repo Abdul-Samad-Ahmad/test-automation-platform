@@ -1,0 +1,4 @@
+*.apk
+*.apks
+/frontend/test-platform/node_modules/
+/backend/static/icons
