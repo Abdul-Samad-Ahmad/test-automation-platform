@@ -24,7 +24,7 @@ class TestLogin:
 
          # Compute project root (…/test-automation-platform)
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        locators_path = os.path.join(project_root, "tests", "locators", "elements.json")
+        locators_path = os.path.join(project_root, "locators", "regular_farmer.json")
 
         with open(locators_path, 'r') as f:
             xpaths = json.load(f)

@@ -1,39 +1,3 @@
-// import { useState } from 'react'
-// import reactLogo from './assets/react.svg'
-// import viteLogo from '/vite.svg'
-// import './App.css'
-
-// function App() {
-//   const [count, setCount] = useState(0)
-
-//   return (
-//     <>
-//       <div>
-//         <a href="https://vite.dev" target="_blank">
-//           <img src={viteLogo} className="logo" alt="Vite logo" />
-//         </a>
-//         <a href="https://react.dev" target="_blank">
-//           <img src={reactLogo} className="logo react" alt="React logo" />
-//         </a>
-//       </div>
-//       <h1>Vite + React</h1>
-//       <div className="card">
-//         <button onClick={() => setCount((count) => count + 1)}>
-//           count is {count}
-//         </button>
-//         <p>
-//           Edit <code>src/App.jsx</code> and save to test HMR
-//         </p>
-//       </div>
-//       <p className="read-the-docs">
-//         Click on the Vite and React logos to learn more
-//       </p>
-//     </>
-//   )
-// }
-
-// export default App
-
 import React, { useState, useEffect, useRef } from 'react';
 import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -41,9 +5,48 @@ import { Play, Terminal, Activity, CheckCircle, Circle, AlertCircle, Cpu } from 
 import './App.css'; // Import the new CSS file
 
 const WS_URL = 'ws://localhost:8000/ws/test-status';
+const API_URL = 'http://localhost:8000';
+
+// --- CONFIGURATION: App Variants & Modules ---
+const APP_VARIANTS = {
+  FARMER: {
+    id: "regular_farmer",
+    label: "Krishivaas Farmer (Regular)",
+    modules: [
+      { name: 'Login', path: 'tests/test_cases/regular_farmer_test_cases/test_login_pytest.py' },
+      { name: 'Dashboard', path: 'tests/farmer/test_dashboard.py' },
+      { name: 'Add Updates', path: 'tests/farmer/test_updates.py' },
+    ]
+  },
+  CLIENT: {
+    id: "regular_client",
+    label: "Krishivaas Client (Regular)",
+    modules: [
+      { name: 'Login', path: 'tests/test_cases/regular_client_test_cases/test_login_pytest.py' },
+      { name: 'Marketplace', path: 'tests/client/test_marketplace.py' },
+      { name: 'Cart', path: 'tests/client/test_cart.py' },
+    ]
+  },
+  STATE_FARMER: {
+    id: "state_farmer",
+    label: "State Farmer App",
+    modules: [
+      { name: 'Login', path: 'tests/state_farmer/test_login.py' },
+      { name: 'Schemes', path: 'tests/state_farmer/test_schemes.py' },
+    ]
+  },
+  STATE_CLIENT: {
+    id: "state_client",
+    label: "State Client App",
+    modules: [
+      { name: 'Login', path: 'tests/state_client/test_login.py' },
+      { name: 'Tenders', path: 'tests/state_client/test_tenders.py' },
+    ]
+  }
+};
 
 // --- COMPONENT: Module Flow Status ---
-const ModuleFlow = ({ modules }) => {
+const ModuleFlow = ({ modules, isRunning, onToggleModule }) => {
   return (
     <div className="dashboard-card module-card">
       <h3 className="card-title">
@@ -67,8 +70,23 @@ const ModuleFlow = ({ modules }) => {
 
           return (
             <div key={idx} className={`module-item ${statusClass}`}>
-              {icon}
-              <span className="module-name">{mod.name}</span>
+              {/* Show checkbox only if NOT running */}
+              {!isRunning ? (
+                <input
+                  type="checkbox"
+                  checked={!!mod.isSelected}
+                  onChange={() => onToggleModule(idx)}
+                  className="mr-2 cursor-pointer"
+                  style={{ marginRight: '8px' }}
+                />
+              ) : (
+                // Show status icon if running or if selected
+                mod.isSelected ? icon : <Circle size={16} className="text-gray-500" />
+              )}
+
+              <span className={`module-name ${!mod.isSelected && !isRunning ? 'opacity-50' : ''}`}>
+                {mod.name}
+              </span>
               {mod.status === 'running' && <span className="status-label">Testing...</span>}
             </div>
           );
@@ -109,14 +127,6 @@ const MetricsChart = ({ data }) => {
 const LogConsole = ({ logs }) => {
   const endRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState('');
-
-  // useEffect(() => {
-  //   // Auto-scroll only when not searching
-  //   if (!searchTerm) {
-  //     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  //   }
-  // }, [logs, searchTerm]);
-
   const filteredLogs = logs.filter((log) => {
     if (!searchTerm) return true;
     const q = searchTerm.toLowerCase();
@@ -185,16 +195,37 @@ function App() {
   const [appIcon, setAppIcon] = useState(null);
   const [appTitle, setAppTitle] = useState('');
   const [isDeviceConnected, setIsDeviceConnected] = useState(false);
-  const [modules, setModules] = useState([
-    { name: 'Login', status: 'pending' },
-    { name: 'Dashboard', status: 'pending' },
-    // { name: 'Onboarding', status: 'pending' },
-    { name: 'Add farmer updates', status: 'pending' },
-  ]);
+  const [selectedAppKey, setSelectedAppKey] = useState('FARMER');
+  // Initialize modules based on default selection
+  const [modules, setModules] = useState(() => {
+    return APP_VARIANTS['FARMER'].modules.map(m => ({
+      ...m,
+      status: 'pending',
+      isSelected: true
+    }));
+  });
+
   const [existingApks, setExistingApks] = useState([]);
   const [selectedApk, setSelectedApk] = useState('');
   const reportWindowRef = useRef(null);
   const [hasOpenedReport, setHasOpenedReport] = useState(false);
+
+  // --- Update modules when App Type changes ---
+  useEffect(() => {
+    if (!isRunning) {
+      setModules(APP_VARIANTS[selectedAppKey].modules.map(m => ({
+        ...m,
+        status: 'pending',
+        isSelected: true
+      })));
+    }
+  }, [selectedAppKey, isRunning]);
+
+  const toggleModuleSelection = (index) => {
+    if (isRunning) return;
+    setModules(prev => prev.map((m, i) => i === index ? { ...m, isSelected: !m.isSelected } : m));
+  };
+
   const updateModuleStatus = (moduleName, newStatus) => {
     setModules(prev =>
       prev.map(m =>
@@ -221,155 +252,92 @@ function App() {
 
   const handleIncomingData = (data) => {
     if (data.type === 'LOG') {
-      const message = data.payload?.message || '';
-      const status = data.payload?.status || 'INFO';
-
-      setLogs(prev => [
-        ...prev,
-        {
-          time: new Date().toLocaleTimeString(),
-          message,
-          type: status,
-        },
-      ]);
-
-      // (optional) keep your existing LOG-based heuristics if you like
-      const lowerMsg = message.toLowerCase();
-      if (
-        lowerMsg.includes("login") &&
-        (lowerMsg.includes("starting") || lowerMsg.includes("start"))
-      ) {
-        updateModuleStatus("Login", "running");
-      }
-      if (
-        lowerMsg.includes("login") &&
-        (lowerMsg.includes("passed") || lowerMsg.includes("success"))
-      ) {
-        updateModuleStatus("Login", "completed");
-      }
-      if (lowerMsg.includes("login") && lowerMsg.includes("failed")) {
-        updateModuleStatus("Login", "failed");
-      }
-
-    } else if (data.type === 'METRIC') {
-      setMetrics(prev => {
-        const newMetrics = [...prev, data.payload];
-        return newMetrics.slice(-20);
-      });
+      const { message, status } = data.payload || {};
+      setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), message, type: status || 'INFO' }]);
 
     } else if (data.type === 'MODULE') {
-      const moduleName = data.payload?.module;
-      const status = data.payload?.status;
-      const message = data.payload?.message || '';
-
-      if (moduleName && status) {
-        // 1) Update module status and also decide if anything is still running
+      const { module, status, message } = data.payload || {};
+      if (module && status) {
         setModules(prev => {
           const updated = prev.map(m =>
-            m.name.toLowerCase() === moduleName.toLowerCase()
-              ? { ...m, status }
-              : m
+            m.name.toLowerCase() === module.toLowerCase() ? { ...m, status } : m
           );
-
-          const anyRunning = updated.some(m => m.status === 'running');
-          if (!anyRunning) {
-            // No modules are running anymore -> show "Run Test" again
-            setIsRunning(false);
-          }
-
+          if (!updated.some(m => m.status === 'running')) setIsRunning(false);
           return updated;
         });
 
-        // 2) Log the module status change
         if (message) {
-          setLogs(prev => [
-            ...prev,
-            {
-              time: new Date().toLocaleTimeString(),
-              message: `[${moduleName}] ${message}`,
-              type: status.toUpperCase(),
-            },
-          ]);
+          setLogs(prev => [...prev, { time: new Date().toLocaleTimeString(), message: `[${module}] ${message}`, type: status.toUpperCase() }]);
         }
       }
     } else if (data.type === 'RUN_COMPLETE') {
-      openOrNavigateReport(data.payload?.report_url);
+      if (!hasOpenedReport && data.payload?.report_url) {
+        window.open(data.payload.report_url, '_blank', 'noopener,noreferrer');
+        setHasOpenedReport(true);
+      }
     }
   };
 
-
-  const handleRunTest = async () => {
-    setHasOpenedReport(false);
-    // Pre-open a tab to avoid popup blockers
-    // reportWindowRef.current = window.open('about:blank', '_blank');
-    // if (reportWindowRef.current) {
-    //   reportWindowRef.current.document.title = "Allure Report";
-    //   reportWindowRef.current.document.body.innerHTML = "<p>Generating Allure report... Please wait.</p>";
-    // }
-
+const handleRunTest = async () => {
     if (!apkUrl && !selectedApk) {
-      alert("Please enter a Google Drive URL first!");
+      alert("Please enter a Google Drive URL or select an existing APK!");
       return;
     }
-    setModules(prev => prev.map(m => ({ ...m, status: 'pending' }))); // reset
 
+    const testsToRun = modules
+      .filter(m => m.isSelected)
+      .map(m => ({ name: m.name, path: m.path }));
+
+    if (testsToRun.length === 0) {
+      alert("Please select at least one module to run.");
+      return;
+    }
+
+    setHasOpenedReport(false);
+    setModules(prev => prev.map(m => ({ ...m, status: 'pending' })));
     setIsRunning(true);
     setIsDownloading(!!apkUrl);
-    setLogs([]); // Clear old logs
-    setMetrics([]); // Clear old metrics
+    setLogs([]); 
 
-    // 1. Show immediate feedback in UI logs
+    // --- NEW: Add initial log ---
+    const appLabel = APP_VARIANTS[selectedAppKey].label;
     handleIncomingData({
       type: 'LOG',
-      payload: {
-        message: selectedApk
-          ? `Initializing test with existing APK: ${selectedApk}`
-          : "Initializing test request...",
-        status: 'INFO'
+      payload: { 
+        message: `Initializing ${appLabel} test with ${testsToRun.length} modules...`, 
+        status: 'INFO' 
       }
     });
 
-
     try {
-      let response;
+      // --- NEW: Send app_type in payload ---
+      const payload = {
+        tests_to_run: testsToRun,
+        app_type: APP_VARIANTS[selectedAppKey].id 
+      };
 
-      if (selectedApk) {
-        // Use existing APK on backend
-        response = await fetch('http://localhost:8000/start-test-existing', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apk_name: selectedApk }),
-        });
-      } else {
-        // Download from URL as before
-        response = await fetch('http://localhost:8000/start-test', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: apkUrl }),
-        });
-      }
+      let endpoint = selectedApk ? '/start-test-existing' : '/start-test';
+      let body = selectedApk 
+        ? { ...payload, apk_name: selectedApk } 
+        : { ...payload, url: apkUrl };
+
+      const response = await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
 
       const data = await response.json();
 
-      if (data.app_icon) {
-        setAppIcon(data.app_icon);
-      }
+      if (data.app_icon) setAppIcon(data.app_icon);
+      if (data.app_name) setAppTitle(data.app_name);
 
-      if (data.app_name) {
-        setAppTitle(data.app_name);
-      }
+      if (!response.ok) throw new Error(data.detail || 'Failed to start test');
 
-      if (!response.ok) {
-        throw new Error(data.detail || 'Failed to start test');
-      }
-
-      // 3. Backend accepted it
       handleIncomingData({
         type: 'LOG',
-        payload: { message: `APK Downloaded at: ${data.apk_path}`, status: 'SUCCESS' }
+        payload: { message: `Backend accepted job. APK Path: ${data.apk_path}`, status: 'SUCCESS' }
       });
-
-      // Note: The WebSocket will handle the rest of the updates (Installing, Testing, etc.)
 
     } catch (error) {
       console.error("Error starting test:", error);
@@ -377,118 +345,44 @@ function App() {
         type: 'LOG',
         payload: { message: `Error: ${error.message}`, status: 'FAILED' }
       });
-      setIsRunning(false); // Reset button state on error
+      setIsRunning(false);
     } finally {
       setIsDownloading(false);
     }
   };
 
-  const handleStopTest = async () => {
-    // Tell backend to stop (implement /stop-test there)
+const handleStopTest = async () => {
     try {
-      await fetch('http://localhost:8000/stop-test', {
-        method: 'POST'
-      });
-      const data = await res.json();
-      console.log('stop-test response:', data);
-
-      // Optional: show result in logs
-      handleIncomingData({
-        type: 'LOG',
-        payload: {
-          message: `Stop-test backend response: ${JSON.stringify(data)}`,
-          status: data.status === 'stopped' ? 'INFO' : 'FAILED'
-        }
-      });
-    } catch (e) {
-      console.error('Error calling /stop-test:', e);
-    }
-
-    // Immediately update UI
+      await fetch(`${API_URL}/stop-test`, { method: 'POST' });
+    } catch (e) { console.error(e); }
     setIsRunning(false);
     setIsDownloading(false);
-
-    // Mark any running modules as failed/stopped
-    setModules(prev =>
-      prev.map(m =>
-        m.status === 'running' ? { ...m, status: 'failed' } : m
-      )
-    );
-
-    // Log stop event
-    handleIncomingData({
-      type: 'LOG',
-      payload: {
-        message: 'Test run stopped by user.',
-        status: 'FAILED'
-      }
-    });
+    handleIncomingData({ type: 'LOG', payload: { message: 'Test stopped by user.', status: 'FAILED' } });
   };
 
-  // Poll device status every 5s
+// Poll device & Load APKs
   useEffect(() => {
     const checkDevice = async () => {
       try {
-        const res = await fetch('http://localhost:8000/device-status');
+        const res = await fetch(`${API_URL}/device-status`);
         const data = await res.json();
         setIsDeviceConnected(!!data.connected);
-      } catch (e) {
-        setIsDeviceConnected(false);
-      }
+      } catch (e) { setIsDeviceConnected(false); }
     };
-    checkDevice();
-    const id = setInterval(checkDevice, 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    const checkDevice = async () => {
-      try {
-        const res = await fetch('http://localhost:8000/device-status');
-        const data = await res.json();
-        setIsDeviceConnected(!!data.connected);
-      } catch (e) {
-        setIsDeviceConnected(false);
-      }
-    };
-    checkDevice();
-    const id = setInterval(checkDevice, 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Load list of existing APKs once
-  useEffect(() => {
+    
     const loadApks = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/apk-list');
+        const res = await fetch(`${API_URL}/api/apk-list`);
         const data = await res.json();
         setExistingApks(data.apks || []);
-      } catch (e) {
-        // ignore errors
-      }
+      } catch (e) {}
     };
+
     loadApks();
+    checkDevice();
+    const id = setInterval(checkDevice, 5000);
+    return () => clearInterval(id);
   }, []);
-  // const simulateTest = () => {
-  //   let tick = 0;
-  //   const interval = setInterval(() => {
-  //     tick++;
-  //     const simMetric = {
-  //       time: tick,
-  //       cpu: 20 + Math.random() * 30 + (tick % 10) * 2,
-  //       memory: 150 + Math.random() * 20 + tick
-  //     };
-  //     handleIncomingData({ type: 'METRIC', payload: simMetric });
-
-  //     if (tick === 1) handleIncomingData({ type: 'LOG', payload: { message: "Downloading APK...", status: 'INFO' } });
-  //     if (tick === 10) handleIncomingData({ type: 'LOG', payload: { message: "Starting Module: Authentication", status: 'INFO' } });
-  //     if (tick === 25) handleIncomingData({ type: 'LOG', payload: { message: "Login Button Clicked", status: 'SUCCESS' } });
-  //     if (tick === 40) handleIncomingData({ type: 'LOG', payload: { message: "Module Passed", status: 'SUCCESS' } });
-  //     if (tick === 45) handleIncomingData({ type: 'LOG', payload: { message: "Starting Module: Dashboard", status: 'INFO' } });
-
-  //     if (tick > 100) clearInterval(interval);
-  //   }, 200);
-  // };
 
   return (
     <div className="app-container">
@@ -519,7 +413,7 @@ function App() {
           </div>
           <div className="system-status">
             <div className={`status-dot ${readyState === ReadyState.OPEN ? 'online' : 'offline'}`}></div>
-            <span>{readyState === ReadyState.OPEN ? 'System Online' : 'Offline'}</span>
+            <span>{readyState === ReadyState.OPEN ? 'Server Connected' : 'Offline'}</span>
           </div>
         </div>
       </header>
@@ -528,73 +422,77 @@ function App() {
         {/* Panel 1: Controls */}
         <div className="dashboard-card control-panel">
           <h2 className="card-title">Test Execution</h2>
+          {/* App Selector */}
+          <div className="input-group mb-4">
+            <label className="input-label">Select Application Scope</label>
+            <div className="select-wrapper">
+              <select
+                className="text-input"
+                value={selectedAppKey}
+                onChange={(e) => setSelectedAppKey(e.target.value)}
+                disabled={isRunning}
+              >
+                {Object.entries(APP_VARIANTS).map(([key, config]) => (
+                  <option key={key} value={key}>{config.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="input-group">
+            <label className="input-label">APK Source (Drive URL)</label>
             <input
               type="text"
-              placeholder="Paste Google Drive Link (APK Source)"
+              placeholder="https://drive.google.com/..."
               value={apkUrl}
-              // onChange={(e) => setApkUrl(e.target.value)}
-              onChange={(e) => {
-                setApkUrl(e.target.value);
-                if (e.target.value) setSelectedApk('');
-              }}
+              onChange={(e) => { setApkUrl(e.target.value); if (e.target.value) setSelectedApk(''); }}
               className="text-input"
+              disabled={isRunning || !!selectedApk}
             />
+          </div>
+
+          <div className="input-group mt-2">
+             <label className="input-label">OR Select Existing APK</label>
+             <select
+              className="text-input"
+              value={selectedApk}
+              onChange={(e) => { setSelectedApk(e.target.value); if (e.target.value) setApkUrl(''); }}
+              disabled={isRunning || !!apkUrl}
+            >
+              <option value="">-- Select from Server --</option>
+              {existingApks.map((name) => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="action-row mt-4">
             <button
               onClick={handleRunTest}
               disabled={isRunning}
               className={`run-button ${isRunning ? 'disabled' : ''}`}
             >
               <Play size={18} fill="currentColor" />
-              {isDownloading
-                ? 'Downloading APK...'
-                : (isRunning ? 'Testing...' : 'Run Test')}
-              {isDownloading && <span className="loader" />}
+              {isDownloading ? 'Downloading...' : (isRunning ? 'Running Tests...' : 'Start Automation')}
             </button>
-            {/* New: Stop button */}
+            
             {isRunning && (
-              <button
-                onClick={handleStopTest}
-                disabled={!isRunning}
-                className="run-button stop-button"
-                style={{ marginLeft: '0.5rem' }}
-              >
-                Stop Test
+              <button onClick={handleStopTest} className="run-button stop-button ml-2">
+                Stop
               </button>
             )}
-
-          </div>
-          {/* New: select an existing APK */}
-          <div className="input-group" style={{ marginTop: '0.75rem' }}>
-            <select
-              className="text-input"
-              value={selectedApk}
-              onChange={(e) => {
-                setSelectedApk(e.target.value);
-                if (e.target.value) setApkUrl('');
-              }}
-            >
-              <option value="">Or select existing APK on server...</option>
-              {existingApks.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
 
         {/* Panel 2: Module Flow */}
         <div className="grid-item-flow">
-          <ModuleFlow modules={modules} />
+          <ModuleFlow
+            modules={modules}
+            isRunning={isRunning}
+            onToggleModule={toggleModuleSelection}
+          />
         </div>
 
-        {/* Panel 3: Live Metrics */}
-        {/* <div className="grid-item-chart">
-          <MetricsChart data={metrics} />
-        </div> */}
-
-        {/* Panel 4: Logs */}
+        {/* Panel 3: Logs */}
         <div className="grid-item-logs">
           <LogConsole logs={logs} />
         </div>
