@@ -29,7 +29,7 @@ def _generate_and_open_allure_report(project_root: str) -> None:
     """
     Generates and opens Allure HTML report.
     """
-    allure_cmd = r"C:\Users\Pramo\scoop\shims\allure"
+    allure_cmd = r"C:\Users\ABDUL SAMAD\scoop\shims\allure"
     try:
         send_log("Generating Allure HTML report...", "INFO")
         subprocess.run(
@@ -67,15 +67,15 @@ def _generate_and_open_allure_report(project_root: str) -> None:
 #         send_log("Allure CLI not found or failed to generate report.", "FAILED")
 
 
-def notify_allure_open() -> None:
-    """
-    Ask backend to start Allure server (allure open/serve) and broadcast RUN_COMPLETE.
-    Backend should implement POST /api/allure/start.
-    """
-    try:
-        requests.post(f"{BACKEND_URL}/api/allure/start", timeout=10)
-    except Exception:
-        pass
+# def notify_allure_open() -> None:
+#     """
+#     Ask backend to start Allure server (allure open/serve) and broadcast RUN_COMPLETE.
+#     Backend should implement POST /api/allure/start.
+#     """
+#     try:
+#         requests.post(f"{BACKEND_URL}/api/allure/start", timeout=10)
+#     except Exception:
+#         pass
     
 def _notify_report_ready() -> None:
     try:
@@ -247,7 +247,7 @@ def run_tests_and_get_suggestions(apk_path: str) -> None:
 
     # First module: clean allure-results once at the start
     login_ok = run_pytest_streaming(
-        ["tests/test_cases/test_login_pytest.py", f"--apk={apk_path}", "-v"],
+        ["tests/test_cases/state_client/test_login_pytest.py", f"--apk={apk_path}", "-v"],
         module_name="Login",
         clean_allure=True,
     )
@@ -269,7 +269,7 @@ def run_tests_and_get_suggestions(apk_path: str) -> None:
     _generate_and_open_allure_report(project_root)
 
     # Tell backend to start Allure server and broadcast RUN_COMPLETE (frontend opens it)
-    notify_allure_open()
+    # notify_allure_open()
 
 if __name__ == "__main__":
     # run_tests_and_get_suggestions()
