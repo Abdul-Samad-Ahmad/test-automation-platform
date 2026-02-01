@@ -64,3 +64,4 @@ def pytest_runtest_makereport(item, call):
                 )
             except Exception as e:
                 print(f"Failed to capture screenshot: {str(e)}")
+ 

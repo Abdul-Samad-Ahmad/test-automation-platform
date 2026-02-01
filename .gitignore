@@ -4,4 +4,5 @@
 /backend/static/icons
 allure-results
 allure-report
+*.part
 # *.pyc

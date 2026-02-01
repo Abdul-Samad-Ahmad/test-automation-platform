@@ -2,6 +2,7 @@ import os
 import gdown
 import uuid
 import shutil
+import sys
 from androguard.core.apk import APK
 
 # Base directory of the backend package (this file)
@@ -11,6 +12,19 @@ BASE_DIR = os.path.dirname(__file__)
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "temp_apks")
 # Config for where to save extracted icons
 ICON_DIR = os.path.join(BASE_DIR, "static", "icons")
+
+# --- Helper Class to Capture STDERR (for tqdm progress) ---
+class ProgressCapture:
+    def __init__(self, callback):
+        self.callback = callback
+
+    def write(self, message):
+        # Only send non-empty messages
+        if message and message.strip():
+            self.callback(message)
+
+    def flush(self):
+        pass
 
 def extract_app_icon(apk_path: str) -> str:
     """
@@ -69,7 +83,7 @@ def get_apk_info(apk_path: str) -> dict | None:
         print(f"❌ Failed to read APK info: {e}")
         return None
     
-def download_apk(gdrive_url: str) -> str:
+def download_apk(gdrive_url: str, progress_callback=None) -> str:
     """
     Downloads APK from Google Drive into DOWNLOAD_DIR,
     keeping the original APK filename.
@@ -82,7 +96,14 @@ def download_apk(gdrive_url: str) -> str:
     print(f"⬇️ Starting download from GDrive: {gdrive_url}")
     print(f"📂 Target Directory: {DOWNLOAD_DIR}")
 
+    # Capture original stderr
+    original_stderr = sys.stderr
+
     try:
+        # Redirect stderr if callback provided
+        if progress_callback:
+            sys.stderr = ProgressCapture(progress_callback)
+
         # 2. Let gdown decide the filename (original name), download to current dir
         tmp_path = gdown.download(
             gdrive_url,
@@ -116,6 +137,10 @@ def download_apk(gdrive_url: str) -> str:
             os.remove(tmp_path)
         raise e
     
+    finally:
+        # Restore stderr
+        sys.stderr = original_stderr
+    
 def cleanup_apk(file_path: str):
     """
     Optional: Call this after test finishes to free up space
@@ -123,3 +148,28 @@ def cleanup_apk(file_path: str):
     if os.path.exists(file_path):
         os.remove(file_path)
         print(f"🧹 Cleaned up temporary APK: {file_path}")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python gdrive_loader.py <url>")
+        sys.exit(1)
+    
+    url = sys.argv[1]
+
+    # Callback to print normalized progress to STDOUT for server.py to read
+    def cli_progress_callback(msg):
+        # Remove Carriage Returns
+        clean = msg.replace('\r', '').strip()
+        if clean:
+            # Prefix with 'PROGRESS:' so server knows it's a status update
+            print(f"PROGRESS:{clean}")
+            sys.stdout.flush()
+
+    try:
+        path = download_apk(url, cli_progress_callback)
+        # Output the final result with a specific prefix
+        print(f"RESULT:{path}")
+    except Exception as e:
+        # Print error to stderr so server wraps it in 400
+        sys.stderr.write(str(e))
+        sys.exit(1)
