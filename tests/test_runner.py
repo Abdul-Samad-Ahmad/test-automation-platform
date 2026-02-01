@@ -8,7 +8,7 @@ import allure_pytest  # pip install allure-pytest
 import requests
 import subprocess
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, List, Dict
 
 load_dotenv()
 
@@ -17,6 +17,32 @@ CURRENT_PROC: Optional[subprocess.Popen] = None
 
 RESULTS_DIR = "allure-results"
 REPORT_DIR = "allure-report"
+
+# --- CONFIGURATION: Test Registry for Krishivaas Apps ---
+# Define the mapping of App Types -> Modules -> Script Paths here.
+# TEST_REGISTRY = {
+#     "farmer": {
+#         "login": "tests/test_cases/regular_farmer_test_cases/test_login_pytest.py",
+#         "onboarding": "tests/regular_farmer/test_onboarding_pytest.py",
+#         "dashboard": "tests/regular_farmer/test_dashboard_pytest.py",
+#         "crop_advisory": "tests/regular_farmer/test_crop_advisory_pytest.py",
+#     },
+#     "client": {
+#         "login": "tests/test_cases/regular_client_test_cases/test_login_pytest.py",
+#         "orders": "tests/regular_client/test_orders.py",
+#         "payments": "tests/regular_client/test_payments.py",
+#     },
+#     "state_farmer": {
+#         "login": "tests/state_farmer/test_login.py",
+#         "schemes": "tests/state_farmer/test_schemes.py",
+#         "subsidy": "tests/state_farmer/test_subsidy.py",
+#     },
+#     "state_client": {
+#         "login": "tests/state_client/test_login.py",
+#         "reports": "tests/state_client/test_reports.py",
+#         "audit": "tests/state_client/test_audit.py",
+#     }
+# }
 
 def _ensure_clean_allure_dirs(project_root: str) -> None:
     os.makedirs(os.path.join(project_root, RESULTS_DIR), exist_ok=True)
@@ -33,7 +59,7 @@ def _generate_and_open_allure_report(project_root: str) -> None:
     try:
         send_log("Generating Allure HTML report...", "INFO")
         subprocess.run(
-            [allure_cmd, "generate", "allure-results", "-o", "allure-report", "--clean"],
+            [allure_cmd, "generate", RESULTS_DIR, "-o", REPORT_DIR, "--clean"],
             cwd=project_root,
             check=True,
             shell=True
@@ -41,7 +67,7 @@ def _generate_and_open_allure_report(project_root: str) -> None:
         send_log("Allure HTML report generated.", "SUCCESS")
         send_log("Opening Allure report in browser...", "INFO")
         subprocess.Popen(
-            [allure_cmd, "open", "allure-report"],
+            [allure_cmd, "open", REPORT_DIR],
             cwd=project_root,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -50,42 +76,13 @@ def _generate_and_open_allure_report(project_root: str) -> None:
     except Exception as e:
         send_log(f"Allure CLI not found or failed: {e}", "FAILED")
 
-# def _generate_allure_report(project_root: str) -> None:
-#     """
-#     Generates HTML report into <project_root>/allure-report
-#     Requires: Allure CLI installed and available in PATH.
-#     """
-#     try:
-#         send_log("Generating Allure HTML report...", "INFO")
-#         subprocess.run(
-#             ["allure", "generate", RESULTS_DIR, "-o", REPORT_DIR, "--clean"],
-#             cwd=project_root,
-#             check=False,
-#         )
-#         send_log("Allure HTML report generated.", "SUCCESS")
-#     except Exception:
-#         send_log("Allure CLI not found or failed to generate report.", "FAILED")
-
-
-# def notify_allure_open() -> None:
-#     """
-#     Ask backend to start Allure server (allure open/serve) and broadcast RUN_COMPLETE.
-#     Backend should implement POST /api/allure/start.
-#     """
-#     try:
-#         requests.post(f"{BACKEND_URL}/api/allure/start", timeout=10)
-#     except Exception:
-#         pass
-    
-def _notify_report_ready() -> None:
+def notify_allure_open() -> None:
+    """
+    Ask backend to start Allure server (allure open/serve) and broadcast RUN_COMPLETE.
+    Backend should implement POST /api/allure/start.
+    """
     try:
-        report_url = f"{BACKEND_URL}/allure-report/index.html"
-        requests.post(
-            f"{BACKEND_URL}/api/run-complete",
-            json={"report_url": report_url},
-            timeout=3,
-        )
-        send_log(f"Allure report ready: {report_url}", "SUCCESS")
+        requests.post(f"{BACKEND_URL}/api/allure/start", timeout=10)
     except Exception:
         pass
 
@@ -228,10 +225,47 @@ def run_pytest_streaming(pytest_args: list[str], module_name: str, clean_allure:
 
     return ok
 
-def run_tests_and_get_suggestions(apk_path: str) -> None:
+# def resolve_test_modules(app_type: str, module_names: Optional[List[str]] = None) -> List[Dict[str, str]]:
+#     """
+#     Helper to resolve a list of runnable test configs based on the app type and selected modules.
+    
+#     :param app_type: One of 'regular_farmer', 'regular_client', 'state_farmer', 'state_client'
+#     :param module_names: List of keys (e.g. ['login', 'dashboard']). If None/Empty, runs ALL for that app.
+#     :return: List of dicts suitable for 'tests_to_run'
+#     """
+#     app_config = TEST_REGISTRY.get(app_type.lower())
+#     if not app_config:
+#         send_log(f"Unknown App Type: {app_type}. Available: {list(TEST_REGISTRY.keys())}", "FAILED")
+#         return []
+
+#     resolved_tests = []
+    
+#     # If no specific modules selected, select ALL for this app
+#     target_keys = module_names if module_names else list(app_config.keys())
+
+#     for key in target_keys:
+#         script_path = app_config.get(key.lower())
+#         if script_path:
+#             resolved_tests.append({"name": key.capitalize(), "path": script_path})
+#         else:
+#             send_log(f"Warning: Module '{key}' not found for app '{app_type}'", "WARNING")
+            
+#     return resolved_tests
+
+def run_tests_and_get_suggestions(
+    apk_path: str, 
+    tests_to_run: Optional[List[Dict[str, str]]] = None,
+    app_type: Optional[str] = None,
+    module_names: Optional[List[str]] = None
+) -> None:
     """
-    Entry point called from FastAPI (background task).
+    Entry point called from FastAPI or CLI.
     Runs tests -> generates Allure report -> asks backend to open Allure server.
+    
+    :param apk_path: Path to the APK file.
+    :param tests_to_run: Direct list of modules (overrides app_type logic if provided).
+    :param app_type: If provided, resolves tests from TEST_REGISTRY.
+    :param module_names: Specific modules to run for the app_type.
     """
     project_root = os.path.dirname(os.path.dirname(__file__))
 
@@ -243,48 +277,73 @@ def run_tests_and_get_suggestions(apk_path: str) -> None:
 
     send_log(f"Running tests for APK: {apk_path}", "INFO")
 
+    # 1. Determine which tests to run
+    final_test_list = []
+
+    if tests_to_run:
+        # Caller provided explicit paths
+        final_test_list = tests_to_run
+    elif app_type:
+        # Resolve using registry
+        send_log(f"Resolving modules for App: {app_type}", "INFO")
+        # final_test_list = resolve_test_modules(app_type, module_names)
+    else:
+        # Fallback default
+        send_log("No specific modules or app_type provided. Running default login test.", "WARNING")
+        final_test_list = [{"name": "Login", "path": "tests/test_cases/test_login_pytest.py"}]
+
+    if not final_test_list:
+        send_log("No valid test modules found to run. Aborting.", "FAILED")
+        return
+
+    # 2. Run the tests
     overall_ok = True
+    for index, test_config in enumerate(final_test_list):
+        module_name = test_config.get("name", f"Module {index + 1}")
+        script_path = test_config.get("path")
+        
+        # Verify script exists before running
+        full_script_path = os.path.join(project_root, script_path) if script_path else ""
+        if not script_path or not os.path.exists(full_script_path):
+            send_log(f"Skipping {module_name}: Script not found at {script_path}", "WARNING")
+            continue
 
-    # First module: clean allure-results once at the start
-    login_ok = run_pytest_streaming(
-        ["tests/test_cases/state_client/test_login_pytest.py", f"--apk={apk_path}", "-v"],
-        module_name="Login",
-        clean_allure=True,
-    )
-    overall_ok = overall_ok and login_ok
+        # Only clean allure results on the FIRST module
+        should_clean = (index == 0)
 
-    # Add more modules similarly (DO NOT clean_allure again)
-    # dashboard_ok = run_pytest_streaming(
-    #     ["tests/test_cases/test_dashboard_pytest.py", f"--apk={apk_path}", "-v"],
-    #     module_name="Dashboard",
-    # )
-    # overall_ok = overall_ok and dashboard_ok
+        module_ok = run_pytest_streaming(
+            [script_path, f"--apk={apk_path}", "-v"],
+            module_name=module_name,
+            clean_allure=should_clean,
+        )
+        overall_ok = overall_ok and module_ok
 
     if overall_ok:
-        send_log("All modules passed", "SUCCESS")
+        send_log("All selected modules passed", "SUCCESS")
     else:
         send_log("Some modules failed", "FAILED")
 
-    # Generate report AFTER tests
+    # 3. Generate and Open Report
     _generate_and_open_allure_report(project_root)
-
-    # Tell backend to start Allure server and broadcast RUN_COMPLETE (frontend opens it)
     # notify_allure_open()
 
 if __name__ == "__main__":
-    # run_tests_and_get_suggestions()
-    # Example usage for manual testing
-    # import sys
-    # if len(sys.argv) > 1:
-    #     apk = sys.argv[1]
-    # else:
-    #     print("Usage: python tests/test_runner.py <apk_path>")
-    #     sys.exit(1)
-    # run_tests_and_get_suggestions(apk)
+    # CLI Usage: 
+    # python tests/test_runner.py <apk_path> <app_type> [module1] [module2] ...
+    # Example: python tests/test_runner.py app.apk regular_farmer login dashboard
+
     import sys
 
-    if len(sys.argv) <= 1:
-        print("Usage: python tests/test_runner.py <apk_path>")
-        raise SystemExit(1)
+    if len(sys.argv) < 2:
+        print("Usage: python tests/test_runner.py <apk_path> [app_type] [module_names...]")
+        sys.exit(1)
 
-    run_tests_and_get_suggestions(sys.argv[1])
+    apk_arg = sys.argv[1]
+    app_type_arg = sys.argv[2] if len(sys.argv) > 2 else None
+    modules_arg = sys.argv[3:] if len(sys.argv) > 3 else None
+
+    run_tests_and_get_suggestions(
+        apk_path=apk_arg,
+        app_type=app_type_arg,
+        module_names=modules_arg
+    )
